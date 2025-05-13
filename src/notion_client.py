@@ -42,6 +42,7 @@ class NotionClient:
     def upload_markdown(self, filepath: str, database_id: Optional[str] = None, page_id: Optional[str] = None) -> str:
         """
         Markdownファイルを読み込み、Notionページとしてアップロードします。
+        タイトルに絵文字が含まれている場合は、ページアイコンとして設定します。
 
         Args:
             filepath: アップロードするMarkdownファイルのパス
@@ -59,24 +60,28 @@ class NotionClient:
         with open(file_path, "r", encoding="utf-8") as f:
             markdown_content = f.read()
 
-        # Markdownをパースしてブロックに変換
-        blocks, title = self.converter.parse_markdown_to_blocks(markdown_content)
+        # Markdownをパースしてブロックに変換（タイトルとアイコンも取得）
+        blocks, title, icon = self.converter.parse_markdown_to_blocks(markdown_content)
+
+        # ページ作成時のiconパラメータを準備
+        icon_param = {"type": "emoji", "emoji": icon} if icon else None
 
         # ページを作成
+        create_kwargs = {
+            "properties": {"title": {"title": [{"text": {"content": title}}]}},
+            "children": blocks,
+        }
+        if icon_param:
+            create_kwargs["icon"] = icon_param
+
         if database_id:
             # データベース内にページを作成
-            page = self.client.pages.create(
-                parent={"database_id": database_id},
-                properties={"title": {"title": [{"text": {"content": title}}]}},
-                children=blocks,
-            )
+            create_kwargs["parent"] = {"database_id": database_id}
+            page = self.client.pages.create(**create_kwargs)
         elif page_id:
             # 親ページの下に新規ページを作成
-            page = self.client.pages.create(
-                parent={"page_id": page_id},
-                properties={"title": {"title": [{"text": {"content": title}}]}},
-                children=blocks,
-            )
+            create_kwargs["parent"] = {"page_id": page_id}
+            page = self.client.pages.create(**create_kwargs)
         else:
             # 親ページIDが指定されていない場合は、エラーを発生させる
             raise ValueError(

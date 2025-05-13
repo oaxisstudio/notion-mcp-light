@@ -22,16 +22,17 @@ class MarkdownConverter:
         """
         self.markdown_parser = mistune.create_markdown()
 
-    def parse_markdown_to_blocks(self, md: str) -> List[Dict[str, Any]]:
+    def parse_markdown_to_blocks(self, md: str) -> tuple[List[Dict[str, Any]], str, str | None]:
         """
         Markdownテキストをパースし、Notionブロック形式に変換します。
         ToDoとbulleted_list_itemのネスト（2スペース以上のインデント）に対応します。
+        タイトル（最初のH1）に絵文字が1つ含まれている場合、タイトルから絵文字を削除し、その絵文字をPage icon用に返します。
 
         Args:
             md: 変換するMarkdownテキスト
 
         Returns:
-            Notionブロック形式のリスト, タイトル
+            (Notionブロック形式のリスト, タイトル, アイコン絵文字 or None)
         """
         # Markdownを行ごとに分割
         lines = md.strip().split("\n")
@@ -39,6 +40,7 @@ class MarkdownConverter:
 
         # タイトル（H1）を抽出
         title = None
+        icon = None
         content_start_idx = 0
         title_found = False  # 最初のH1検出フラグ
 
@@ -49,7 +51,21 @@ class MarkdownConverter:
 
             # 最初のH1をタイトルとして扱う
             if not title_found and line.startswith("# "):
-                title = line[2:].strip()
+                title_text = line[2:].strip()
+                # 先頭に絵文字が1つ含まれている場合は抽出
+                if title_text:
+                    first_char = title_text[0]
+                    # 絵文字判定（Unicodeの絵文字範囲を簡易的に判定）
+                    # 参考: https://stackoverflow.com/questions/499345/regular-expression-to-match-emoji-characters
+                    import re
+                    emoji_pattern = re.compile(r"^[\U0001F300-\U0001FAFF\U00002700-\U000027BF\U0001F1E6-\U0001F1FF\U0001F900-\U0001F9FF\U00002600-\U000026FF]")
+                    if emoji_pattern.match(first_char):
+                        icon = first_char
+                        title = title_text[1:].strip()
+                    else:
+                        title = title_text
+                else:
+                    title = ""
                 title_found = True
                 content_start_idx = i + 1
                 i += 1
@@ -167,7 +183,7 @@ class MarkdownConverter:
                 last_parent = None
             i += 1
 
-        return blocks, title
+        return blocks, title, icon
 
     def convert_blocks_to_markdown(self, blocks: List[Dict[str, Any]], title: str = None) -> str:
         """
