@@ -25,94 +25,146 @@ class MarkdownConverter:
     def parse_markdown_to_blocks(self, md: str) -> List[Dict[str, Any]]:
         """
         Markdownテキストをパースし、Notionブロック形式に変換します。
+        ToDoとbulleted_list_itemのネスト（2スペース以上のインデント）に対応します。
 
         Args:
             md: 変換するMarkdownテキスト
 
         Returns:
-            Notionブロック形式のリスト
+            Notionブロック形式のリスト, タイトル
         """
         # Markdownを行ごとに分割
         lines = md.strip().split("\n")
-        blocks = []
+        blocks = []  # 最終的なNotionブロックリスト
 
         # タイトル（H1）を抽出
         title = None
         content_start_idx = 0
+        title_found = False  # 最初のH1検出フラグ
 
-        # H1をタイトルとして扱う
-        for i, line in enumerate(lines):
-            if line.startswith("# "):
+        # すべての行を順に処理
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+
+            # 最初のH1をタイトルとして扱う
+            if not title_found and line.startswith("# "):
                 title = line[2:].strip()
+                title_found = True
                 content_start_idx = i + 1
-                break
+                i += 1
+                continue  # タイトル行はブロック化しない
+            i += 1
 
         # タイトルがない場合は空文字を設定
         if title is None:
             title = ""
 
-        # 残りの内容をブロックに変換
+        # ネスト対応用の親ブロック参照
+        last_parent = None  # 直近の親ブロック（ToDoまたはbulleted_list_item）
+
         i = content_start_idx
         while i < len(lines):
             line = lines[i]
+            # 行頭スペース数をカウント
+            indent = len(line) - len(line.lstrip(' '))
+            content_line = line.lstrip(' ')
 
+            # ToDo（チェックボックス）
+            if content_line.startswith("- [ ]") or content_line.startswith("- [x]"):
+                checked = content_line.startswith("- [x]")
+                content = content_line[5:].strip()
+                block = {
+                    "type": "to_do",
+                    "to_do": {
+                        "rich_text": [
+                            {"type": "text", "text": {"content": content}}
+                        ],
+                        "checked": checked,
+                        "color": "default"
+                    },
+                }
+                # インデント2スペース以上なら直前の親のchildrenに追加
+                if indent >= 2 and last_parent is not None and last_parent["type"] == "to_do":
+                    if "children" not in last_parent["to_do"]:
+                        last_parent["to_do"]["children"] = []
+                    last_parent["to_do"]["children"].append(block)
+                else:
+                    blocks.append(block)
+                    last_parent = block  # 新しい親として記憶
+            # 箇条書き（bulleted_list_item）
+            elif content_line.startswith("- "):
+                content = content_line[2:].strip()
+                block = {
+                    "type": "bulleted_list_item",
+                    "bulleted_list_item": {
+                        "rich_text": [
+                            {"type": "text", "text": {"content": content}}
+                        ]
+                    },
+                }
+                # インデント2スペース以上なら直前の親のchildrenに追加
+                if indent >= 2 and last_parent is not None and last_parent["type"] == "bulleted_list_item":
+                    if "children" not in last_parent["bulleted_list_item"]:
+                        last_parent["bulleted_list_item"]["children"] = []
+                    last_parent["bulleted_list_item"]["children"].append(block)
+                else:
+                    blocks.append(block)
+                    last_parent = block  # 新しい親として記憶
+            # H1（2つ目以降はheading_1ブロックとして扱う）
+            elif content_line.startswith("# "):
+                block = {
+                    "type": "heading_1",
+                    "heading_1": {"rich_text": [{"type": "text", "text": {"content": content_line[2:].strip()}}]},
+                }
+                blocks.append(block)
+                last_parent = None  # 親リセット
             # 見出し（H2-H6）
-            if line.startswith("## "):
-                blocks.append(
-                    {
-                        "type": "heading_2",
-                        "heading_2": {"rich_text": [{"type": "text", "text": {"content": line[3:].strip()}}]},
-                    }
-                )
-            elif line.startswith("### "):
-                blocks.append(
-                    {
-                        "type": "heading_3",
-                        "heading_3": {"rich_text": [{"type": "text", "text": {"content": line[4:].strip()}}]},
-                    }
-                )
-            # 箇条書き
-            elif line.startswith("- "):
-                blocks.append(
-                    {
-                        "type": "bulleted_list_item",
-                        "bulleted_list_item": {"rich_text": [{"type": "text", "text": {"content": line[2:].strip()}}]},
-                    }
-                )
+            elif content_line.startswith("## "):
+                block = {
+                    "type": "heading_2",
+                    "heading_2": {"rich_text": [{"type": "text", "text": {"content": content_line[3:].strip()}}]},
+                }
+                blocks.append(block)
+                last_parent = None
+            elif content_line.startswith("### "):
+                block = {
+                    "type": "heading_3",
+                    "heading_3": {"rich_text": [{"type": "text", "text": {"content": content_line[4:].strip()}}]},
+                }
+                blocks.append(block)
+                last_parent = None
             # 番号付きリスト
-            elif line.strip() and line[0].isdigit() and ". " in line:
-                content = line.split(". ", 1)[1]
-                blocks.append(
-                    {
-                        "type": "numbered_list_item",
-                        "numbered_list_item": {"rich_text": [{"type": "text", "text": {"content": content.strip()}}]},
-                    }
-                )
+            elif content_line.strip() and content_line[0].isdigit() and ". " in content_line:
+                content = content_line.split(". ", 1)[1]
+                block = {
+                    "type": "numbered_list_item",
+                    "numbered_list_item": {"rich_text": [{"type": "text", "text": {"content": content.strip()}}]},
+                }
+                blocks.append(block)
+                last_parent = None
             # コードブロック
-            elif line.startswith("```"):
+            elif content_line.startswith("```"):
                 code_lines = []
-                language = line[3:].strip()
+                language = content_line[3:].strip()
                 i += 1
-
                 while i < len(lines) and not lines[i].startswith("```"):
                     code_lines.append(lines[i])
                     i += 1
-
-                blocks.append(
-                    {
-                        "type": "code",
-                        "code": {
-                            "rich_text": [{"type": "text", "text": {"content": "\n".join(code_lines)}}],
-                            "language": language if language else "plain text",
-                        },
-                    }
-                )
+                block = {
+                    "type": "code",
+                    "code": {
+                        "rich_text": [{"type": "text", "text": {"content": "\n".join(code_lines)}}],
+                        "language": language if language else "plain text",
+                    },
+                }
+                blocks.append(block)
+                last_parent = None
             # 通常のテキスト（段落）
-            elif line.strip():
-                blocks.append(
-                    {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": line.strip()}}]}}
-                )
-
+            elif content_line.strip():
+                block = {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": content_line.strip()}}]}}
+                blocks.append(block)
+                last_parent = None
             i += 1
 
         return blocks, title
