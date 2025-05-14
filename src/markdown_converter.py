@@ -176,6 +176,13 @@ class MarkdownConverter:
                 }
                 blocks.append(block)
                 last_parent = None
+            # Divider（--- のみの行）
+            elif content_line.strip() == '---':
+                block = {"type": "divider", "divider": {}}
+                blocks.append(block)
+                last_parent = None
+                i += 1
+                continue
             # 通常のテキスト（段落）
             elif content_line.strip():
                 block = {"type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": content_line.strip()}}]}}
